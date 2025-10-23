@@ -1,51 +1,67 @@
 # key_manager.py
 import os
-import base64
-from cryptography.fernet import Fernet
+import psycopg2
+import random
+import string
+import sys
 from dotenv import load_dotenv
 
-def generate_new_secret():
-    """Tạo một secret key mới và in ra màn hình."""
-    key = Fernet.generate_key()
-    print("🔑 SECRET_KEY mới của bạn là:\n")
-    print(key.decode('utf-8'))
-    print("\nSao chép key này và dán vào file .env cũng như biến môi trường trên Vercel.")
+load_dotenv()
 
-def generate_license_key(duration_days: int):
-    """Tạo một license key đã được mã hóa sử dụng SECRET_KEY từ môi trường."""
-    load_dotenv()
-    secret_str = os.environ.get('SECRET_KEY')
+DATABASE_URL = os.environ.get('POSTGRES_URL')
+if not DATABASE_URL:
+    raise RuntimeError("🔴 LỖI: POSTGRES_URL phải được thiết lập trong file .env.")
+
+def generate_random_key(length=6):
+    """Tạo một key ngẫu nhiên gồm chữ và số."""
+    chars = string.ascii_uppercase + string.digits
+    return ''.join(random.choice(chars) for _ in range(length))
+
+def create_keys(count: int, duration: int):
+    """Tạo và lưu một số lượng key mới vào database."""
+    print(f"Đang kết nối tới database để tạo {count} key với thời hạn {duration} ngày...")
+    conn = psycopg2.connect(DATABASE_URL)
+    cursor = conn.cursor()
     
-    if not secret_str:
-        print("🔴 Không tìm thấy SECRET_KEY trong file .env.")
-        print("Vui lòng chạy script này với lệnh 'new' để tạo key trước.")
-        return
-
-    try:
-        secret_key = secret_str.encode('utf-8')
-        f = Fernet(secret_key)
+    generated_keys = []
+    for i in range(count):
+        while True:
+            # Tạo key mới cho đến khi tìm được key chưa tồn tại trong DB
+            new_key = generate_random_key()
+            cursor.execute("SELECT license_key FROM licenses WHERE license_key = %s", (new_key,))
+            if cursor.fetchone() is None:
+                break
         
-        duration_bytes = str(duration_days).encode('utf-8')
-        encrypted_token = f.encrypt(duration_bytes)
-        license_key = base64.urlsafe_b64encode(encrypted_token).decode('utf-8')
-        
-        print(f"\n🎉 Đã tạo license key mới có thời hạn {duration_days} ngày:")
-        print(license_key)
-    except Exception as e:
-        print(f"🔴 Đã xảy ra lỗi. SECRET_KEY của bạn có hợp lệ không? Lỗi: {e}")
+        try:
+            cursor.execute(
+                "INSERT INTO licenses (license_key, duration_days) VALUES (%s, %s)",
+                (new_key, duration)
+            )
+            generated_keys.append(new_key)
+        except Exception as e:
+            print(f"🔴 Lỗi khi chèn key {new_key}: {e}")
+            conn.rollback() # Hoàn tác nếu có lỗi
+            
+    conn.commit()
+    cursor.close()
+    conn.close()
+    
+    if generated_keys:
+        print("\n🎉 Đã tạo và lưu thành công các key sau vào database:")
+        for key in generated_keys:
+            print(key)
+    else:
+        print("Không có key nào được tạo.")
 
 if __name__ == '__main__':
-    print("--- Công Cụ Tạo License Key ---")
-    command = input("Nhập 'new' để tạo SECRET_KEY mới, hoặc nhập thời hạn license theo ngày (ví dụ: 30): ")
-    
-    if command.lower() == 'new':
-        generate_new_secret()
-    else:
-        try:
-            days = int(command)
-            if days > 0:
-                generate_license_key(days)
-            else:
-                print("🔴 Vui lòng nhập một số dương cho số ngày.")
-        except ValueError:
-            print("🔴 Đầu vào không hợp lệ. Vui lòng nhập một số.")
+    print("--- Công Cụ Quản Lý License Key ---")
+    try:
+        # Lấy tham số từ dòng lệnh, ví dụ: python key_manager.py 10 30
+        num_keys_to_create = int(sys.argv[1])
+        duration_days = int(sys.argv[2])
+        create_keys(num_keys_to_create, duration_days)
+    except IndexError:
+        print("Cách dùng: python key_manager.py <số lượng key> <thời hạn theo ngày>")
+        print("Ví dụ:   python key_manager.py 10 30  (để tạo 10 key, mỗi key 30 ngày)")
+    except ValueError:
+        print("🔴 Dữ liệu không hợp lệ. Vui lòng nhập số cho số lượng và thời hạn.")

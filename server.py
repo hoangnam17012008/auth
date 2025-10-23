@@ -2,65 +2,46 @@
 from flask import Flask, request, jsonify
 import psycopg2
 from datetime import datetime, timedelta
-from cryptography.fernet import Fernet
 import os
 from dotenv import load_dotenv
 
-# Tải các biến môi trường để phát triển local (Vercel sẽ tự động xử lý)
 load_dotenv()
 
 # --- CẤU HÌNH ---
 DATABASE_URL = os.environ.get('POSTGRES_URL')
-SECRET_KEY_STR = os.environ.get('SECRET_KEY')
-
-# --- KHỞI TẠO ---
 app = Flask(__name__)
 
-# Kiểm tra xem các biến môi trường đã được thiết lập chưa
-if not DATABASE_URL or not SECRET_KEY_STR:
-    raise RuntimeError("🔴 LỖI NGHIÊM TRỌNG: POSTGRES_URL và SECRET_KEY phải được thiết lập trong môi trường.")
-
-try:
-    SECRET_KEY = SECRET_KEY_STR.encode('utf-8')
-    fernet = Fernet(SECRET_KEY)
-except Exception as e:
-    raise RuntimeError(f"🔴 LỖI NGHIÊM TRỌNG: SECRET_KEY không hợp lệ. Nó phải là một key Fernet hợp lệ. Lỗi: {e}")
-
+if not DATABASE_URL:
+    raise RuntimeError("🔴 LỖI: POSTGRES_URL phải được thiết lập trong môi trường.")
 
 def get_db_connection():
     """Thiết lập kết nối đến cơ sở dữ liệu PostgreSQL."""
-    try:
-        conn = psycopg2.connect(DATABASE_URL)
-        return conn
-    except psycopg2.OperationalError as e:
-        raise RuntimeError(f"🔴 LỖI NGHIÊM TRỌNG: Không thể kết nối đến cơ sở dữ liệu: {e}")
-
+    conn = psycopg2.connect(DATABASE_URL)
+    return conn
 
 def init_database():
-    """Khởi tạo bảng trong cơ sở dữ liệu nếu chưa tồn tại."""
-    print("Đang kiểm tra bảng trong cơ sở dữ liệu...")
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS licenses (
-                license_key TEXT PRIMARY KEY,
-                hwid TEXT NOT NULL,
-                end_date TEXT NOT NULL
-            )
-        ''')
-        conn.commit()
-        cursor.close()
-        conn.close()
-        print("✅ Bảng trong cơ sở dữ liệu đã sẵn sàng.")
-    except Exception as e:
-        print(f"🔴 Lỗi trong quá trình khởi tạo cơ sở dữ liệu: {e}")
-
+    """Khởi tạo bảng licenses với cấu trúc mới."""
+    print("Đang kiểm tra bảng 'licenses' với cấu trúc mới...")
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS licenses (
+            license_key TEXT PRIMARY KEY,
+            duration_days INTEGER NOT NULL,
+            is_activated BOOLEAN DEFAULT FALSE,
+            hwid TEXT,
+            activation_date TEXT,
+            end_date TEXT
+        )
+    ''')
+    conn.commit()
+    cursor.close()
+    conn.close()
+    print("✅ Bảng 'licenses' đã sẵn sàng.")
 
 # --- ENDPOINT CỦA API ---
 @app.route('/validate', methods=['POST'])
 def validate_license():
-    """Endpoint chính để xác thực license key."""
     data = request.get_json()
     if not data or 'key' not in data or 'hwid' not in data:
         return jsonify({'status': 'error', 'message': 'Thiếu key hoặc hwid.'}), 400
@@ -69,42 +50,53 @@ def validate_license():
     hwid = data['hwid']
 
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT hwid, end_date FROM licenses WHERE license_key = %s", (license_key,))
-    row = cursor.fetchone()
+    # Dùng DictCursor để dễ dàng truy cập cột bằng tên
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    cursor.execute("SELECT * FROM licenses WHERE license_key = %s", (license_key,))
+    key_data = cursor.fetchone()
 
-    if row:
-        # Key đã tồn tại: Xác thực HWID và ngày hết hạn
-        stored_hwid, end_date_str = row
-        if stored_hwid != hwid:
-            cursor.close(), conn.close()
-            return jsonify({'status': 'error', 'message': 'HWID không khớp.'}), 403
-
-        if datetime.now() > datetime.fromisoformat(end_date_str):
-            cursor.close(), conn.close()
-            return jsonify({'status': 'error', 'message': 'License đã hết hạn.'}), 403
-        
+    # TRƯỜNG HỢP 1: KEY KHÔNG TỒN TẠI
+    if not key_data:
         cursor.close(), conn.close()
-        return jsonify({'status': 'success', 'message': 'License hợp lệ.', 'expires_on': end_date_str}), 200
-    else:
-        # Key chưa tồn tại: Thử kích hoạt lần đầu
-        try:
-            encrypted_token = base64.urlsafe_b64decode(license_key.encode('utf-8'))
-            decrypted_duration_bytes = fernet.decrypt(encrypted_token, ttl=None)
-            duration_days = int(decrypted_duration_bytes.decode('utf-8'))
-            
-            end_date = datetime.now() + timedelta(days=duration_days)
-            end_date_str = end_date.isoformat()
+        return jsonify({'status': 'error', 'message': 'License key không tồn tại.'}), 404
 
-            cursor.execute("INSERT INTO licenses (license_key, hwid, end_date) VALUES (%s, %s, %s)",
-                           (license_key, hwid, end_date_str))
-            conn.commit()
-            cursor.close(), conn.close()
-            
-            return jsonify({'status': 'success', 'message': 'Kích hoạt license thành công!', 'expires_on': end_date_str}), 200
-        except Exception:
-            cursor.close(), conn.close()
-            return jsonify({'status': 'error', 'message': 'License key không hợp lệ.'}), 400
+    # TRƯỜNG HỢP 2: KÍCH HOẠT LẦN ĐẦU
+    if not key_data['is_activated']:
+        print(f"Kích hoạt key lần đầu: {license_key} cho HWID: {hwid}")
+        activation_date = datetime.now()
+        end_date = activation_date + timedelta(days=key_data['duration_days'])
+        
+        cursor.execute("""
+            UPDATE licenses 
+            SET is_activated = TRUE, hwid = %s, activation_date = %s, end_date = %s
+            WHERE license_key = %s
+        """, (hwid, activation_date.isoformat(), end_date.isoformat(), license_key))
+        
+        conn.commit()
+        cursor.close(), conn.close()
+        return jsonify({
+            'status': 'success', 
+            'message': 'Kích hoạt license thành công!',
+            'expires_on': end_date.isoformat()
+        }), 200
 
-# Khởi tạo bảng cơ sở dữ liệu khi ứng dụng khởi động
+    # TRƯỜNG HỢP 3: XÁC THỰC KEY ĐÃ KÍCH HOẠT
+    if key_data['hwid'] != hwid:
+        cursor.close(), conn.close()
+        return jsonify({'status': 'error', 'message': 'HWID không khớp. Key đã được dùng trên máy khác.'}), 403
+
+    end_date = datetime.fromisoformat(key_data['end_date'])
+    if datetime.now() > end_date:
+        cursor.close(), conn.close()
+        return jsonify({'status': 'error', 'message': 'License đã hết hạn.'}), 403
+
+    # Mọi thứ hợp lệ
+    cursor.close(), conn.close()
+    return jsonify({
+        'status': 'success', 
+        'message': 'License hợp lệ.',
+        'expires_on': key_data['end_date']
+    }), 200
+
 init_database()
