@@ -1,6 +1,7 @@
 # server.py
 from flask import Flask, request, jsonify
 import psycopg2
+import psycopg2.extras
 from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
@@ -98,5 +99,3 @@ def validate_license():
         'message': 'License hợp lệ.',
         'expires_on': key_data['end_date']
     }), 200
-
-init_database()
