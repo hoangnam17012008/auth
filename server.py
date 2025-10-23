@@ -55,9 +55,9 @@ def validate_license():
         cursor.close(), conn.close()
         return jsonify({'status': 'error', 'message': 'License key không tồn tại.'}), 404
 
+    # TRƯỜNG HỢP 1: KÍCH HOẠT LẦN ĐẦU
     if not key_data['is_activated']:
         print(f"Kích hoạt key lần đầu: {license_key} cho HWID: {hwid}")
-        
         activation_date = datetime.now()
         end_date = None
         
@@ -79,6 +79,14 @@ def validate_license():
             'expires_on': end_date
         }), 200
 
+    # TRƯỜNG HỢP 2: HWID ĐÃ BỊ RESET (NULL), CẬP NHẬT HWID MỚI
+    if key_data['is_activated'] and key_data['hwid'] is None:
+        print(f"Cập nhật HWID mới cho key đã reset: {license_key} -> {hwid}")
+        cursor.execute("UPDATE licenses SET hwid = %s WHERE license_key = %s", (hwid, license_key))
+        conn.commit()
+        # Sau khi cập nhật, tiếp tục thực thi phần còn lại để xác thực
+    
+    # TRƯỜNG HỢP 3: XÁC THỰC KEY ĐÃ KÍCH HOẠT
     if key_data['hwid'] != hwid:
         cursor.close(), conn.close()
         return jsonify({'status': 'error', 'message': 'HWID không khớp. Key đã được dùng trên máy khác.'}), 403
