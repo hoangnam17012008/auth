@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Python
 # File bytecode và môi trường ảo
 
@@ -29,3 +30,5 @@ key_manager.py
 # Files cho IDEs, macOS, etc.
 .vscode/
 .idea/
+=======
+>>>>>>> a72925f6aad98f7f4ca339df06ca0af7ef4cc52e
