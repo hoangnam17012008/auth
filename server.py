@@ -12,14 +12,14 @@ DATABASE_URL = os.environ.get('POSTGRES_URL')
 app = Flask(__name__)
 
 if not DATABASE_URL:
-    raise RuntimeError("🔴 LỖI NGHIÊM TRỌNG: POSTGRES_URL phải được thiết lập trong môi trường.")
+    raise RuntimeError("🔴 LỖỖI NGHIÊM TRỌNG: POSTGRES_URL phải được thiết lập trong môi trường.")
 
 def get_db_connection():
     try:
         conn = psycopg2.connect(DATABASE_URL)
         return conn
     except psycopg2.OperationalError as e:
-        raise RuntimeError(f"🔴 LỖI NGHIÊM TRỌNG: Không thể kết nối đến cơ sở dữ liệu: {e}")
+        raise RuntimeError(f"🔴 LỖỖI NGHIÊM TRỌNG: Không thể kết nối đến cơ sở dữ liệu: {e}")
 
 def init_database():
     print("Đang kiểm tra bảng trong cơ sở dữ liệu...")
@@ -145,4 +145,5 @@ if __name__ == '__main__':
         print("-" * 35)
 
     else:
-        app.run(debug=True)
+        # Lệnh chạy server Flask, chỉ dùng cho local development
+        app.run(host="0.0.0.0", port=8000, debug=True)
