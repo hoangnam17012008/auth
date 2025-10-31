@@ -1,3 +1,31 @@
-.env
+# Python
+# File bytecode và môi trường ảo
+
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Thư mục môi trường ảo (Virtual Environments)
+.venv
+venv/
+env/
+
+# Dependencies
+/pip-wheel-metadata
+.python-version
+
+# Database and configuration
+.DS_Store
+*.db
+*.sqlite3
+
+# File chứa biến môi trường nhạy cảm
+.env
+
+# Tool quản lý Key (Không cần triển khai/theo dõi)
+key_manager.py
+
+# Files cho IDEs, macOS, etc.
+.vscode/
+.idea/
