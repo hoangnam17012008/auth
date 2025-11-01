@@ -57,7 +57,8 @@ def validate_license():
     if not data or 'uid' not in data:
         return jsonify({'status': 'error', 'message': 'Thiếu uid.'}), 400
 
-    uid = data['uid']
+    # Bắt buộc chuyển UID sang kiểu chuỗi (TEXT) để khớp với kiểu dữ liệu trong DB
+    uid = str(data['uid'])
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -119,6 +120,9 @@ def validate_license():
 def verify(uid):
     conn = get_db_connection()
     cursor = conn.cursor()
+    
+    # Bắt buộc chuyển UID sang kiểu chuỗi (TEXT)
+    uid = str(uid)
     
     cursor.execute("SELECT duration_days, end_date FROM licenses WHERE uid = %s", (uid,))
     row = cursor.fetchone()
