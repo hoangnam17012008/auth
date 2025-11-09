@@ -44,7 +44,6 @@ def init_database():
         cursor.execute('''CREATE TABLE IF NOT EXISTS redeem_keys (
     key_value TEXT PRIMARY KEY,
     duration_days INT NOT NULL,
-    is_used BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT (NOW() AT TIME ZONE 'utc'))''')
         conn.commit()
         cursor.close()
