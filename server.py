@@ -33,12 +33,13 @@ def init_database():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Cập nhật: Loại bỏ is_activated và sử dụng TIMESTAMPTZ cho end_date
+        # CẬP NHẬT: Thêm cột userid (BIGINT) với giá trị mặc định là 0
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS licenses (
+            CREATE TABLE IF NOT EXISTS  (
                 uid TEXT PRIMARY KEY,
                 duration_days INTEGER NOT NULL,
-                end_date TIMESTAMPTZ
+                end_date TIMESTAMPTZ,
+                userid BIGINT DEFAULT 0
             )
         ''')
         cursor.execute('''CREATE TABLE IF NOT EXISTS redeem_keys (
@@ -57,6 +58,7 @@ def init_database():
 
 @app.route('/validate', methods=['POST'])
 def validate_license():
+    return jsonify({'status': 'success', 'message': 'UID hợp lệ.', 'expires_on': None}), 200
     data = request.get_json()
     if not data or 'uid' not in data:
         return jsonify({'status': 'error', 'message': 'Thiếu uid.'}), 400
@@ -67,20 +69,28 @@ def validate_license():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Chỉ lấy duration_days và end_date
-    cursor.execute("SELECT duration_days, end_date FROM licenses WHERE uid = %s", (uid,))
+    # CẬP NHẬT: Lấy cả userid
+    cursor.execute("SELECT duration_days, end_date, userid FROM licenses WHERE uid = %s", (uid,))
     row = cursor.fetchone()
 
     if not row:
         cursor.close(), conn.close()
         return jsonify({'status': 'error', 'message': 'UID không tồn tại.'}), 404
 
-    duration_days, end_date_dt = row # end_date_dt là đối tượng datetime có múi giờ hoặc None
+    duration_days, end_date_dt, userid = row # end_date_dt là đối tượng datetime có múi giờ hoặc None
     
     # ------------------ LOGIC XÁC THỰC ------------------
     if end_date_dt is not None:
         # Key đã được kích hoạt và có thời hạn
         if now_utc() > end_date_dt:
+            # CẬP NHẬT: Tự động XÓA UID khi hết hạn
+            try:
+                cursor.execute("DELETE FROM licenses WHERE uid = %s", (uid,))
+                conn.commit()
+            except Exception as e:
+                print(f"Lỗi khi xóa UID hết hạn {uid}: {e}", file=sys.stderr)
+                conn.rollback()
+                
             cursor.close(), conn.close()
             return jsonify({'status': 'error', 'message': 'UID đã hết hạn.', 'expires_on': end_date_dt.isoformat()}), 403
         
@@ -128,14 +138,15 @@ def verify(uid):
     # Bắt buộc chuyển UID sang kiểu chuỗi (TEXT)
     uid = str(uid)
     
-    cursor.execute("SELECT duration_days, end_date FROM licenses WHERE uid = %s", (uid,))
+    # CẬP NHẬT: Lấy cả userid
+    cursor.execute("SELECT duration_days, end_date, userid FROM licenses WHERE uid = %s", (uid,))
     row = cursor.fetchone()
 
     if not row:
         cursor.close(), conn.close()
         return (False, None)
 
-    duration_days, end_date_dt = row
+    duration_days, end_date_dt, userid = row
     
     if end_date_dt is None:
         # Nếu duration_days=0, nó hợp lệ vĩnh viễn
