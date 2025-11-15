@@ -58,7 +58,6 @@ def init_database():
 
 @app.route('/validate', methods=['POST'])
 def validate_license():
-    return jsonify({'status': 'success', 'message': 'UID hợp lệ.', 'expires_on': None}), 200
     data = request.get_json()
     if not data or 'uid' not in data:
         return jsonify({'status': 'error', 'message': 'Thiếu uid.'}), 400
